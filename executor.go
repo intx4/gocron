@@ -384,7 +384,7 @@ func (e *executor) runJob(j internalJob, jIn jobIn) {
 			return
 		}
 	} else if !j.disabledLocker && j.locker != nil {
-		lock, err := j.locker.Lock(j.ctx, j.name)
+		lock, err := j.locker.Lock(j.ctx, j.name, j.lockTTL)
 		if err != nil {
 			_ = callJobFuncWithParams(j.afterLockError, j.id, j.name, err)
 			e.sendOutForRescheduling(&jIn)
@@ -394,7 +394,7 @@ func (e *executor) runJob(j internalJob, jIn jobIn) {
 		}
 		defer func() { _ = lock.Unlock(j.ctx) }()
 	} else if !j.disabledLocker && e.locker != nil {
-		lock, err := e.locker.Lock(j.ctx, j.name)
+		lock, err := e.locker.Lock(j.ctx, j.name, j.lockTTL)
 		if err != nil {
 			_ = callJobFuncWithParams(j.afterLockError, j.id, j.name, err)
 			e.sendOutForRescheduling(&jIn)

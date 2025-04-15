@@ -3,6 +3,7 @@ package gocron
 
 import (
 	"context"
+	"time"
 )
 
 // Elector determines the leader from instances asking to be the leader. Only
@@ -20,7 +21,11 @@ type Elector interface {
 // go function's name, e.g. "pkg.myJob" for func myJob() {} in pkg
 type Locker interface {
 	// Lock if an error is returned by lock, the job will not be scheduled.
-	Lock(ctx context.Context, key string) (Lock, error)
+	// If ttl is nil, the lock will be held for the default ttl of the underlying
+	// distributed lock implementation.
+	// For example, for the Redis distributed lock implementation from github.com/go-co-op/gocron-redis-lock, the ttl is controlled by redislock.WithExpiry, and defaults to 8s.
+	// If ttl is not nil, the lock will be held for minimum between the duration of the job's run, the jobs timeout, and the ttl.
+	Lock(ctx context.Context, key string, ttl *time.Duration) (Lock, error)
 }
 
 // Lock represents an obtained lock. The lock is released after the execution of the job
