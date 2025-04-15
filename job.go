@@ -50,7 +50,8 @@ type internalJob struct {
 	afterLockError                      func(jobID uuid.UUID, jobName string, err error)
 	disabledLocker                      bool
 
-	locker Locker
+	locker  Locker
+	lockTTL *time.Duration
 }
 
 // stop is used to stop the job's timer and cancel the context
@@ -604,6 +605,14 @@ func WithDistributedJobLocker(locker Locker) JobOption {
 			return ErrWithDistributedJobLockerNil
 		}
 		j.locker = locker
+		return nil
+	}
+}
+
+// WithLockTTL sets the ttl for the lock to be acquired when scheduling the job
+func WithLockTTL(ttl time.Duration) JobOption {
+	return func(j *internalJob, _ time.Time) error {
+		j.lockTTL = &ttl
 		return nil
 	}
 }
