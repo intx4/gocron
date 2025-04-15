@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-co-op/gocron/v2"
+	gocron "github.com/go-co-op/gocron/v2"
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 )
@@ -57,7 +57,7 @@ var _ gocron.Locker = new(errorLocker)
 
 type errorLocker struct{}
 
-func (e errorLocker) Lock(_ context.Context, _ string) (gocron.Lock, error) {
+func (e errorLocker) Lock(_ context.Context, _ string, _ *time.Duration) (gocron.Lock, error) {
 	return nil, fmt.Errorf("locked")
 }
 
@@ -727,7 +727,7 @@ var _ gocron.Locker = (*myLocker)(nil)
 
 type myLocker struct{}
 
-func (m myLocker) Lock(ctx context.Context, key string) (gocron.Lock, error) {
+func (m myLocker) Lock(ctx context.Context, key string, ttl *time.Duration) (gocron.Lock, error) {
 	return &testLock{}, nil
 }
 

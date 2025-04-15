@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -57,7 +58,7 @@ var _ Locker = new(errorLocker)
 
 type errorLocker struct{}
 
-func (e errorLocker) Lock(_ context.Context, _ string) (Lock, error) {
+func (e errorLocker) Lock(_ context.Context, _ string, _ *time.Duration) (Lock, error) {
 	return nil, errors.New("locked")
 }
 
@@ -1583,7 +1584,7 @@ type testLocker struct {
 	notLocked chan struct{}
 }
 
-func (t *testLocker) Lock(_ context.Context, _ string) (Lock, error) {
+func (t *testLocker) Lock(_ context.Context, _ string, ttl *time.Duration) (Lock, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.jobLocked {
@@ -1591,6 +1592,18 @@ func (t *testLocker) Lock(_ context.Context, _ string) (Lock, error) {
 		return nil, fmt.Errorf("job already locked")
 	}
 	t.jobLocked = true
+
+	if ttl != nil && *ttl > 0 {
+		// release the lock after the ttl
+		go func() {
+			time.Sleep(*ttl)
+			t.mu.Lock()
+			log.Println("unlocking lock")
+			t.jobLocked = false
+			t.mu.Unlock()
+		}()
+	}
+
 	return &testLock{}, nil
 }
 
@@ -1801,6 +1814,66 @@ func TestScheduler_WithDistributed(t *testing.T) {
 			tt.assertions(t)
 		})
 	}
+}
+
+func TestScheduler_LockerWithTTL(t *testing.T) {
+	defer verifyNoGoroutineLeaks(t)
+
+	t.Run("lock is released after TTL", func(t *testing.T) {
+		// Create a channel to track job executions
+		jobExecutions := make(chan time.Time, 5)
+
+		// Create a test locker with a method to check lock status
+		locker := &testLocker{
+			notLocked: make(chan struct{}, 10),
+		}
+
+		// Create a scheduler with our test locker
+		s := newTestScheduler(t)
+
+		// Create a job that runs every 10 seconds but completes in 4 seconds
+		ttl := 2 * time.Second // 2 seconds ttl
+		_, err := s.NewJob(
+			DurationJob(10*time.Second),
+			NewTask(
+				func() {
+					jobExecutions <- time.Now()
+					time.Sleep(4 * time.Second) // Job takes 4 second to complete
+				},
+			),
+			WithDistributedJobLocker(locker),
+			WithStartAt(WithStartImmediately()),
+			WithLockTTL(ttl),
+		)
+		require.NoError(t, err)
+
+		s.Start()
+
+		// Wait for the first job execution
+		select {
+		case <-jobExecutions:
+			// Job has started
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for job to run")
+		}
+
+		// Check lock is held immediately after job completes
+		time.Sleep(500 * time.Millisecond) // 0.5s after job started
+		locker.mu.Lock()
+		assert.True(t, locker.jobLocked, "lock should still be held 0.5s after job started")
+		locker.mu.Unlock()
+
+		// Wait until after TTL, check lock is released
+		time.Sleep(2 * time.Second) // Now we're ~2.5s after job start, TTL should have expired
+		locker.mu.Lock()
+		assert.False(t, locker.jobLocked, "lock should be released after TTL expires")
+		locker.mu.Unlock()
+
+		// Wait until after job completes
+		time.Sleep(1500 * time.Millisecond)
+
+		require.NoError(t, s.Shutdown())
+	})
 }
 
 func TestScheduler_RemoveJob(t *testing.T) {
